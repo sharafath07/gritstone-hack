@@ -20,101 +20,129 @@ const donationSchema = z.object({
     quantity: z.number().positive(),
     quantityUnit: z.string().trim().min(1).max(30),
     servings: z.number().int().positive().optional(),
-    dietaryTags: z.array(z.string().trim().min(1)).optional(),
+    dietaryTags: z.array(z.string().trim().min(1).max(40)).default([]),
     pickupStart: z.iso.datetime(),
     pickupEnd: z.iso.datetime(),
-}).refine(
+}).strict().refine(
     (data) => new Date(data.pickupEnd) > new Date(data.pickupStart),
     {
         message: "Pickup end must be after pickup start",
         path: ["pickupEnd"],
     },
+).refine(
+    (data) => new Date(data.pickupEnd) > new Date(),
+    {
+        message: "Pickup end must be in the future",
+        path: ["pickupEnd"],
+    },
 );
 
-router.post("/", async (req, res) => {
-    const parsed = donationSchema.safeParse(req.body);
+// Create a donation from donor-confirmed details.
+router.post("/", async (req, res, next) => {
+    try {
+        const parsed = donationSchema.safeParse(req.body);
 
-    if (!parsed.success) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid donation data",
-            errors: parsed.error.issues,
+        if (!parsed.success) {
+            return res.status(400).json({
+                success: false,
+                message: "Please correct the donation details",
+                errors: parsed.error.issues,
+            });
+        }
+
+        const data = parsed.data;
+
+        const donor = await prisma.organization.findUnique({
+            where: { id: data.donorOrgId },
         });
-    }
 
-    const donor = await prisma.organization.findUnique({
-        where: { id: parsed.data.donorOrgId },
-    });
+        if (!donor || !["DONOR", "BOTH"].includes(donor.type)) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid donor organization is required",
+            });
+        }
 
-    if (!donor || !["DONOR", "BOTH"].includes(donor.type)) {
-        return res.status(400).json({
-            success: false,
-            message: "A valid donor organization is required",
+        const donation = await prisma.donation.create({
+            data: {
+                ...data,
+                pickupStart: new Date(data.pickupStart),
+                pickupEnd: new Date(data.pickupEnd),
+            },
+            include: { donor: true },
         });
+
+        return res.status(201).json({
+            success: true,
+            message: "Donation created successfully",
+            data: donation,
+        });
+    } catch (error) {
+        next(error);
     }
-
-    const donation = await prisma.donation.create({
-        data: {
-            ...parsed.data,
-            pickupStart: new Date(parsed.data.pickupStart),
-            pickupEnd: new Date(parsed.data.pickupEnd),
-        },
-        include: { donor: true },
-    });
-
-    return res.status(201).json({
-        success: true,
-        data: donation,
-    });
 });
 
-router.get("/", async (req, res) => {
-    const status = req.query.status;
-    const allowedStatuses = [
-        "AVAILABLE",
-        "MATCHED",
-        "RESERVED",
-        "PICKED_UP",
-        "COMPLETED",
-        "CANCELLED",
-        "EXPIRED",
-    ];
+// List donations, optionally filtered by status.
+router.get("/", async (req, res, next) => {
+    try {
+        const allowedStatuses = [
+            "AVAILABLE",
+            "MATCHED",
+            "RESERVED",
+            "PICKED_UP",
+            "COMPLETED",
+            "CANCELLED",
+            "EXPIRED",
+        ];
 
-    if (status && !allowedStatuses.includes(status)) {
-        return res.status(400).json({
-            success: false,
-            message: "Invalid donation status",
+        const status = req.query.status;
+
+        if (status && !allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid donation status",
+            });
+        }
+
+        const donations = await prisma.donation.findMany({
+            where: status ? { status } : {},
+            include: { donor: true },
+            orderBy: { createdAt: "desc" },
         });
+
+        return res.json({
+            success: true,
+            count: donations.length,
+            data: donations,
+        });
+    } catch (error) {
+        next(error);
     }
-
-    const donations = await prisma.donation.findMany({
-        where: status ? { status } : {},
-        include: { donor: true },
-        orderBy: { createdAt: "desc" },
-    });
-
-    return res.json({
-        success: true,
-        count: donations.length,
-        data: donations,
-    });
 });
 
-router.get("/:id", async (req, res) => {
-    const donation = await prisma.donation.findUnique({
-        where: { id: req.params.id },
-        include: { donor: true, matches: true, pickup: true },
-    });
-
-    if (!donation) {
-        return res.status(404).json({
-            success: false,
-            message: "Donation not found",
+// Get one donation with its matches and pickup.
+router.get("/:id", async (req, res, next) => {
+    try {
+        const donation = await prisma.donation.findUnique({
+            where: { id: req.params.id },
+            include: {
+                donor: true,
+                matches: true,
+                pickup: true,
+            },
         });
-    }
 
-    return res.json({ success: true, data: donation });
+        if (!donation) {
+            return res.status(404).json({
+                success: false,
+                message: "Donation not found",
+            });
+        }
+
+        return res.json({ success: true, data: donation });
+    } catch (error) {
+        next(error);
+    }
 });
 
 export default router;
-
