@@ -2,6 +2,10 @@
 import { Router } from "express";
 import { z } from "zod";
 import prisma from "../lib/prisma.js";
+import {
+    authenticateToken,
+    requireRole,
+} from "../middleware/auth.middleware.js";
 
 const router = Router();
 
@@ -38,7 +42,7 @@ const donationSchema = z.object({
 );
 
 // Create a donation from donor-confirmed details.
-router.post("/", async (req, res, next) => {
+router.post("/", authenticateToken, requireRole("DONOR"), async (req, res, next) => {
     try {
         const parsed = donationSchema.safeParse(req.body);
 

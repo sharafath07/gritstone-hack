@@ -1,0 +1,20 @@
+ backend/.gitignore                                 |    4 [32m+[m
+ backend/README.md                                  |    1 [31m-[m
+ backend/package.json                               |   34 [32m+[m
+ backend/pnpm-lock.yaml                             | 1324 [32m++++++++++++++++++++[m
+ backend/pnpm-workspace.yaml                        |    4 [32m+[m
+ backend/prisma.config.ts                           |   16 [32m+[m
+ .../migrations/20261024052506_init/migration.sql   |  136 [32m++[m
+ .../migration.sql                                  |    3 [32m+[m
+ backend/prisma/migrations/migration_lock.toml      |    3 [32m+[m
+ backend/prisma/schema.prisma                       |  141 [32m+++[m
+ backend/src/lib/prisma.js                          |    5 [32m+[m
+ backend/src/routes/ai.routes.js                    |   39 [32m+[m
+ backend/src/routes/donations.routes.js             |  120 [32m++[m
+ backend/src/routes/matches.routes.js               |   57 [32m+[m
+ backend/src/routes/organizations.routes.js         |   81 [32m++[m
+ backend/src/server.js                              |   94 [32m++[m
+ backend/src/services/ai.service.js                 |  175 [32m+++[m
+ backend/src/services/matching.service.js           |  207 [32m+++[m
+ backend/src/test-db.js                             |   14 [32m+[m
+ 19 files changed, 2457 insertions(+), 1 deletion(-)

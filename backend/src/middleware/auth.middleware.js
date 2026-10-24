@@ -1,7 +1,7 @@
-
 import jwt from "jsonwebtoken";
+import prisma from "../lib/prisma.js";
 
-export function authenticateToken(req, res, next) {
+export async function authenticateToken(req, res, next) {
     const authorization = req.headers.authorization;
 
     if (!authorization?.startsWith("Bearer ")) {
@@ -11,7 +11,6 @@ export function authenticateToken(req, res, next) {
         });
     }
 
-    const token = authorization.slice(7);
     const secret = process.env.JWT_SECRET;
 
     if (!secret || secret.length < 32) {
@@ -22,7 +21,7 @@ export function authenticateToken(req, res, next) {
     }
 
     try {
-        const payload = jwt.verify(token, secret, {
+        const payload = jwt.verify(authorization.slice(7), secret, {
             issuer: "secondserve-api",
             audience: "secondserve-client",
         });
@@ -30,8 +29,7 @@ export function authenticateToken(req, res, next) {
         if (
             typeof payload === "string" ||
             !payload.sub ||
-            !payload.organizationId ||
-            !payload.role
+            !payload.organizationId
         ) {
             return res.status(401).json({
                 success: false,
@@ -39,18 +37,37 @@ export function authenticateToken(req, res, next) {
             });
         }
 
-        req.user = {
-            id: payload.sub,
-            role: payload.role,
-            organizationId: payload.organizationId,
-        };
-
-        next();
-    } catch {
-        return res.status(401).json({
-            success: false,
-            message: "Invalid or expired authentication token",
+        // Check the current database record instead of trusting
+        // organization and role information from the token alone.
+        const user = await prisma.user.findUnique({
+            where: { id: payload.sub },
+            select: {
+                id: true,
+                role: true,
+                organizationId: true,
+            },
         });
+
+        if (!user || !user.organizationId) {
+            return res.status(401).json({
+                success: false,
+                message: "User account is invalid or no longer active",
+            });
+        }
+
+        req.user = user;
+        next();
+    } catch (error) {
+        if (error.name === "JsonWebTokenError" ||
+            error.name === "TokenExpiredError" ||
+            error.name === "NotBeforeError") {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid or expired authentication token",
+            });
+        }
+
+        next(error);
     }
 }
 
