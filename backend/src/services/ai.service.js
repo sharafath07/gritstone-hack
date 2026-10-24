@@ -27,14 +27,23 @@ function extractLocally(description) {
     const text = description.trim();
     const lower = text.toLowerCase();
 
-    const quantityMatch = lower.match(
-        /\b(\d+(?:\.\d+)?)\s*(kg|kilograms?|g|grams?|litres?|liters?|l|ml|boxes|packs|packets|meals|portions|items|pieces|loaves|breads)\b/i,
-    );
 
-    let quantity = quantityMatch ? Number(quantityMatch[1]) : null;
+    const quantityMatch =
+        lower.match(
+            /\b(\d+(?:\.\d+)?)\s*(kg|kilograms?|g|grams?|litres?|liters?|l|ml|boxes|packs|packets|meals|portions|items|pieces|loaves|breads)\b/i,
+        ) ??
+        lower.match(
+            /\b(\d+(?:\.\d+)?)\s+(?:fresh\s+|leftover\s+|surplus\s+|remaining\s+)?(?:vegetarian\s+|vegan\s+|fresh\s+)?(meals|portions|items|pieces|boxes|packs|packets)\b/i,
+        );
+
+    const quantity = quantityMatch
+        ? Number(quantityMatch[1])
+        : null;
+
     let quantityUnit = quantityMatch
         ? quantityMatch[2].toLowerCase()
         : null;
+
 
     if (quantityUnit) {
         const units = {
