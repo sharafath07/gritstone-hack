@@ -2,8 +2,11 @@
 import { Router } from "express";
 import { z } from "zod";
 import prisma from "../lib/prisma.js";
+import { authenticateToken } from "../middleware/auth.middleware.js";
+import { canTransitionPickup } from "../utils/pickup-transitions.js";
 
 const router = Router();
+router.use(authenticateToken);
 
 const updateSchema = z.object({
     status: z.enum([
@@ -17,18 +20,23 @@ const updateSchema = z.object({
     notes: z.string().trim().max(1000).optional(),
 }).strict();
 
-const transitions = {
-    PENDING: ["SCHEDULED", "FAILED", "CANCELLED"],
-    SCHEDULED: ["IN_TRANSIT", "FAILED", "CANCELLED"],
-    IN_TRANSIT: ["COMPLETED", "FAILED"],
-    COMPLETED: [],
-    FAILED: [],
-    CANCELLED: [],
-};
-
 router.get("/", async (req, res, next) => {
     try {
         const pickups = await prisma.pickup.findMany({
+            where: {
+                OR: [
+                    {
+                        donation: {
+                            donorOrgId: req.user.organizationId,
+                        },
+                    },
+                    {
+                        match: {
+                            recipientOrgId: req.user.organizationId,
+                        },
+                    },
+                ],
+            },
             include: {
                 donation: { include: { donor: true } },
                 match: { include: { recipient: true } },
@@ -48,8 +56,22 @@ router.get("/", async (req, res, next) => {
 
 router.get("/:pickupId", async (req, res, next) => {
     try {
-        const pickup = await prisma.pickup.findUnique({
-            where: { id: req.params.pickupId },
+        const pickup = await prisma.pickup.findFirst({
+            where: {
+                id: req.params.pickupId,
+                OR: [
+                    {
+                        donation: {
+                            donorOrgId: req.user.organizationId,
+                        },
+                    },
+                    {
+                        match: {
+                            recipientOrgId: req.user.organizationId,
+                        },
+                    },
+                ],
+            },
             include: {
                 donation: { include: { donor: true } },
                 match: { include: { recipient: true } },
@@ -63,7 +85,10 @@ router.get("/:pickupId", async (req, res, next) => {
             });
         }
 
-        return res.json({ success: true, data: pickup });
+        return res.json({
+            success: true,
+            data: pickup,
+        });
     } catch (error) {
         next(error);
     }
@@ -103,7 +128,10 @@ router.patch("/:pickupId/status", async (req, res, next) => {
         const result = await prisma.$transaction(async (tx) => {
             const pickup = await tx.pickup.findUnique({
                 where: { id: req.params.pickupId },
-                include: { donation: true },
+                include: {
+                    donation: true,
+                    match: true,
+                },
             });
 
             if (!pickup) {
@@ -112,7 +140,21 @@ router.patch("/:pickupId/status", async (req, res, next) => {
                 throw error;
             }
 
-            if (!transitions[pickup.status]?.includes(status)) {
+            const isDonor =
+                pickup.donation.donorOrgId === req.user.organizationId;
+
+            const isRecipient =
+                pickup.match.recipientOrgId === req.user.organizationId;
+
+            if (!isDonor && !isRecipient) {
+                const error = new Error(
+                    "You are not authorized to update this pickup"
+                );
+                error.status = 403;
+                throw error;
+            }
+
+            if (!canTransitionPickup(pickup.status, status)) {
                 const error = new Error(
                     `Cannot change pickup from ${pickup.status} to ${status}`
                 );
