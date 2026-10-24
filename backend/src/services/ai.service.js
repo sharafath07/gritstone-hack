@@ -30,10 +30,10 @@ function extractLocally(description) {
 
     const quantityMatch =
         lower.match(
-            /\b(\d+(?:\.\d+)?)\s*(kg|kilograms?|g|grams?|litres?|liters?|l|ml|boxes|packs|packets|meals|portions|items|pieces|loaves|breads)\b/i,
+            /\b(\d+(?:\.\d+)?)\s*(kg|kilograms?|g|grams?|litres?|liters?|l|ml|boxes|packs|packets|meals|portions|items|pieces|loaves)\b/i
         ) ??
         lower.match(
-            /\b(\d+(?:\.\d+)?)\s+(?:fresh\s+|leftover\s+|surplus\s+|remaining\s+)?(?:vegetarian\s+|vegan\s+|fresh\s+)?(meals|portions|items|pieces|boxes|packs|packets)\b/i,
+            /\b(\d+(?:\.\d+)?)\s+(?:fresh\s+|leftover\s+|surplus\s+|remaining\s+)?(?:vegetarian\s+|vegan\s+)?(meals|portions|items|pieces|boxes|packs|packets)\b/i
         );
 
     const quantity = quantityMatch
