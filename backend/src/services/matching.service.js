@@ -1,10 +1,9 @@
 
 import prisma from "../lib/prisma.js";
 
-const EARTH_RADIUS_KM = 6371;
-
-function getDistanceKm(lat1, lon1, lat2, lon2) {
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
     const toRadians = (degrees) => (degrees * Math.PI) / 180;
+    const earthRadiusKm = 6371;
 
     const dLat = toRadians(lat2 - lat1);
     const dLon = toRadians(lon2 - lon1);
@@ -16,7 +15,7 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
         Math.sin(dLon / 2) ** 2;
 
     return (
-        EARTH_RADIUS_KM *
+        earthRadiusKm *
         2 *
         Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     );
@@ -31,24 +30,18 @@ function scoreDistance(distanceKm) {
     return 2;
 }
 
-function scoreQuantity(donation, recipient) {
-    if (!donation.servings || !recipient.capacity) {
-        return 10;
-    }
+function scoreQuantity(servings, capacity) {
+    if (servings == null || capacity == null) return 10;
+    if (capacity <= 0) return 0;
+    if (capacity >= servings) return 25;
 
-    if (recipient.capacity >= donation.servings) {
-        return 25;
-    }
-
-    const fitRatio = recipient.capacity / donation.servings;
-    return Math.round(25 * fitRatio);
+    return Math.round((capacity / servings) * 25);
 }
 
 function scoreUrgency(pickupEnd) {
     const hoursRemaining =
         (new Date(pickupEnd).getTime() - Date.now()) / 3_600_000;
 
-    if (hoursRemaining <= 0) return 0;
     if (hoursRemaining <= 2) return 25;
     if (hoursRemaining <= 6) return 20;
     if (hoursRemaining <= 12) return 15;
@@ -56,42 +49,23 @@ function scoreUrgency(pickupEnd) {
     return 5;
 }
 
-function buildExplanation({
-    distanceKm,
-    quantityScore,
-    urgencyScore,
-    donation,
-    recipient,
-}) {
-    const reasons = [];
+function normalizeTags(tags = []) {
+    return new Set(tags.map((tag) => tag.trim().toUpperCase()));
+}
 
-    if (distanceKm !== null) {
-        reasons.push(
-            `approximately ${distanceKm.toFixed(1)} km from the donor`,
-        );
-    } else {
-        reasons.push("distance could not be calculated because location coordinates are missing");
-    }
+function isEligibleRecipient(donation, recipient) {
+    const acceptsCategory =
+        recipient.acceptedCategories.length === 0 ||
+        recipient.acceptedCategories.includes(donation.category);
 
-    if (donation.servings && recipient.capacity) {
-        if (recipient.capacity >= donation.servings) {
-            reasons.push(
-                `listed capacity of ${recipient.capacity} can accommodate ${donation.servings} servings`,
-            );
-        } else {
-            reasons.push(
-                `listed capacity of ${recipient.capacity} is below the ${donation.servings} servings offered`,
-            );
-        }
-    } else {
-        reasons.push("quantity fit could not be fully assessed because serving or capacity data is missing");
-    }
+    const donationTags = normalizeTags(donation.dietaryTags);
+    const requirements = normalizeTags(recipient.dietaryRequirements);
 
-    if (urgencyScore >= 20) {
-        reasons.push("the pickup deadline is approaching");
-    }
+    const requirementsMet = [...requirements].every((requirement) =>
+        donationTags.has(requirement)
+    );
 
-    return `Recommended based on available information: ${reasons.join("; ")}.`;
+    return acceptsCategory && requirementsMet;
 }
 
 export async function generateMatches(donationId) {
@@ -106,19 +80,14 @@ export async function generateMatches(donationId) {
         throw error;
     }
 
-    if (donation.status !== "AVAILABLE") {
+    if (
+        donation.status !== "AVAILABLE" ||
+        new Date(donation.pickupEnd) <= new Date()
+    ) {
         const error = new Error(
-            "Only available donations can be matched",
+            "Only available donations with a future pickup deadline can be matched"
         );
-        error.status = 409;
-        throw error;
-    }
-
-    if (new Date(donation.pickupEnd) <= new Date()) {
-        const error = new Error(
-            "The donation pickup window has expired",
-        );
-        error.status = 409;
+        error.status = 400;
         throw error;
     }
 
@@ -129,79 +98,121 @@ export async function generateMatches(donationId) {
         },
     });
 
-    const ranked = recipients.map((recipient) => {
+    const eligibleRecipients = recipients.filter((recipient) =>
+        isEligibleRecipient(donation, recipient)
+    );
+
+    const ranked = eligibleRecipients.map((recipient) => {
         const hasCoordinates =
-            donation.donor.latitude !== null &&
-            donation.donor.longitude !== null &&
-            recipient.latitude !== null &&
-            recipient.longitude !== null;
+            donation.donor.latitude != null &&
+            donation.donor.longitude != null &&
+            recipient.latitude != null &&
+            recipient.longitude != null;
 
         const distanceKm = hasCoordinates
-            ? getDistanceKm(
+            ? calculateDistanceKm(
                 donation.donor.latitude,
                 donation.donor.longitude,
                 recipient.latitude,
-                recipient.longitude,
+                recipient.longitude
             )
             : null;
 
         const distanceScore = scoreDistance(distanceKm);
-        const quantityScore = scoreQuantity(donation, recipient);
+        const quantityScore = scoreQuantity(
+            donation.servings,
+            recipient.capacity
+        );
         const urgencyScore = scoreUrgency(donation.pickupEnd);
+        const baseScore = 20;
 
-        const score = Math.min(
-            100,
-            distanceScore + quantityScore + urgencyScore + 20,
+        const score =
+            distanceScore + quantityScore + urgencyScore + baseScore;
+
+        const reasons = [];
+
+        if (distanceKm !== null) {
+            reasons.push(`approximately ${distanceKm.toFixed(1)} km away`);
+        } else {
+            reasons.push("distance could not be calculated because location data is missing");
+        }
+
+        if (donation.servings != null && recipient.capacity != null) {
+            reasons.push(
+                `listed capacity is ${recipient.capacity} servings for ${donation.servings} donation servings`
+            );
+        }
+
+        reasons.push(
+            `accepted food category: ${donation.category}`
+        );
+
+        reasons.push(
+            `pickup urgency score: ${urgencyScore}/25`
         );
 
         return {
-            recipientOrgId: recipient.id,
-            score,
-            explanation: buildExplanation({
-                distanceKm,
-                quantityScore,
-                urgencyScore,
-                donation,
-                recipient,
-            }),
+            recipient,
             distanceKm,
+            score: Math.min(score, 100),
+            explanation: reasons.join("; "),
         };
     });
 
     ranked.sort((a, b) => b.score - a.score);
 
-    const savedMatches = await prisma.$transaction(
-        ranked.map((candidate) =>
-            prisma.match.upsert({
+    const eligibleIds = ranked.map(({ recipient }) => recipient.id);
+
+    await prisma.$transaction(async (tx) => {
+        // Remove outdated recommendations, without deleting decisions
+        // already made by recipients.
+        await tx.match.deleteMany({
+            where: {
+                donationId,
+                status: "RECOMMENDED",
+                ...(eligibleIds.length
+                    ? { recipientOrgId: { notIn: eligibleIds } }
+                    : {}),
+            },
+        });
+
+        for (const item of ranked) {
+            await tx.match.upsert({
                 where: {
                     donationId_recipientOrgId: {
                         donationId,
-                        recipientOrgId: candidate.recipientOrgId,
+                        recipientOrgId: item.recipient.id,
                     },
+                },
+                update: {
+                    score: item.score,
+                    explanation: item.explanation,
                 },
                 create: {
                     donationId,
-                    recipientOrgId: candidate.recipientOrgId,
-                    score: candidate.score,
-                    explanation: candidate.explanation,
+                    recipientOrgId: item.recipient.id,
+                    score: item.score,
+                    explanation: item.explanation,
+                    status: "RECOMMENDED",
                 },
-                update: {
-                    score: candidate.score,
-                    explanation: candidate.explanation,
-                },
-                include: {
-                    recipient: true,
-                },
-            }),
-        ),
-    );
+            });
+        }
+    });
+
+    const savedMatches = await prisma.match.findMany({
+        where: {
+            donationId,
+            recipientOrgId: { in: eligibleIds },
+        },
+        include: { recipient: true },
+        orderBy: { score: "desc" },
+    });
 
     return savedMatches.map((match) => ({
         ...match,
         distanceKm:
             ranked.find(
-                (candidate) =>
-                    candidate.recipientOrgId === match.recipientOrgId,
+                (item) => item.recipient.id === match.recipientOrgId
             )?.distanceKm ?? null,
-    })).sort((a, b) => b.score - a.score);
+    }));
 }
