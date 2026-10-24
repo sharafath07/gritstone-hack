@@ -4,6 +4,10 @@ import { z } from "zod";
 import prisma from "../lib/prisma.js";
 import { authenticateToken } from "../middleware/auth.middleware.js";
 import { canTransitionPickup } from "../utils/pickup-transitions.js";
+import {
+    isScheduledTimeValid,
+    isPickupDeadlineFuture,
+} from "../utils/pickup-validation.js";
 
 const router = Router();
 router.use(authenticateToken);
@@ -108,12 +112,7 @@ router.patch("/:pickupId/status", async (req, res, next) => {
 
         const { status, scheduledAt, notes } = parsed.data;
 
-        if (status === "SCHEDULED" && !scheduledAt) {
-            return res.status(400).json({
-                success: false,
-                message: "scheduledAt is required when scheduling a pickup",
-            });
-        }
+
 
         if (
             scheduledAt &&
@@ -164,10 +163,10 @@ router.patch("/:pickupId/status", async (req, res, next) => {
 
             if (
                 status === "SCHEDULED" &&
-                new Date(scheduledAt) > new Date(pickup.donation.pickupEnd)
+                !isScheduledTimeValid(scheduledAt, pickup.donation.pickupEnd)
             ) {
                 const error = new Error(
-                    "Scheduled pickup must be before the donation pickup deadline"
+                    "Scheduled pickup must be on or before the donation deadline"
                 );
                 error.status = 400;
                 throw error;
@@ -208,8 +207,9 @@ router.patch("/:pickupId/status", async (req, res, next) => {
             // If the pickup is cancelled or fails, release the donation
             // for a new match only if its collection window remains open.
             if (status === "CANCELLED" || status === "FAILED") {
-                const canBeOfferedAgain =
-                    new Date(pickup.donation.pickupEnd) > new Date();
+                const canBeOfferedAgain = isPickupDeadlineFuture(
+                    pickup.donation.pickupEnd
+                );
 
                 await tx.donation.update({
                     where: { id: pickup.donationId },
