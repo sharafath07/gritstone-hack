@@ -7,6 +7,8 @@ import donationsRouter from "./routes/donations.routes.js";
 import matchesRouter from "./routes/matches.routes.js";
 import aiRouter from "./routes/ai.routes.js";
 import pickupsRouter from "./routes/pickups.routes.js";
+import authRouter from "./routes/auth.routes.js";
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -47,6 +49,7 @@ app.use("/api/organizations", organizationsRouter);
 app.use("/api/donations", donationsRouter);
 app.use("/api/matches", matchesRouter);
 app.use("/api/ai", aiRouter);
+app.use("/api/auth", authRouter);
 app.use("/api/pickups", pickupsRouter);
 
 app.use((error, _req, res, _next) => {
