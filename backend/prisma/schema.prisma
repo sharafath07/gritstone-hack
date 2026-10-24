@@ -1,0 +1,141 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  DONOR
+  RECIPIENT
+  ADMIN
+}
+
+enum OrganizationType {
+  DONOR
+  RECIPIENT
+  BOTH
+}
+
+enum DonationStatus {
+  AVAILABLE
+  MATCHED
+  RESERVED
+  PICKED_UP
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum FoodCategory {
+  MEALS
+  BAKERY
+  PRODUCE
+  DAIRY
+  PACKAGED
+  OTHER
+}
+
+enum MatchStatus {
+  RECOMMENDED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum PickupStatus {
+  PENDING
+  SCHEDULED
+  IN_TRANSIT
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id             String       @id @default(cuid())
+  name           String
+  email          String       @unique
+  passwordHash   String
+  role           UserRole
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Organization {
+  id          String           @id @default(cuid())
+  name        String
+  type        OrganizationType
+  address     String
+  city        String
+  phone       String?
+  latitude    Float?
+  longitude   Float?
+  capacity    Int?
+  acceptedCategories FoodCategory[] @default([])
+  dietaryRequirements String[]      @default([])  
+  users       User[]
+  donations   Donation[]
+  matches     Match[]          @relation("RecipientMatches")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Donation {
+  id             String         @id @default(cuid())
+  donorOrgId     String
+  donor          Organization   @relation(fields: [donorOrgId], references: [id])
+  title          String
+  description    String
+  category       FoodCategory
+  quantity       Float
+  quantityUnit   String
+  servings       Int?
+  dietaryTags    String[]       @default([])
+  pickupStart    DateTime
+  pickupEnd      DateTime
+  status         DonationStatus @default(AVAILABLE)
+  matches        Match[]
+  pickup         Pickup?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([status, pickupEnd])
+  @@index([donorOrgId])
+}
+
+model Match {
+  id              String       @id @default(cuid())
+  donationId      String
+  donation        Donation     @relation(fields: [donationId], references: [id])
+  recipientOrgId  String
+  recipient       Organization @relation("RecipientMatches", fields: [recipientOrgId], references: [id])
+  score           Float
+  explanation     String?
+  status          MatchStatus  @default(RECOMMENDED)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  pickup          Pickup?
+
+  @@unique([donationId, recipientOrgId])
+  @@index([recipientOrgId, status])
+}
+
+model Pickup {
+  id            String       @id @default(cuid())
+  donationId    String       @unique
+  donation      Donation     @relation(fields: [donationId], references: [id])
+  matchId       String       @unique
+  match         Match        @relation(fields: [matchId], references: [id])
+  status        PickupStatus @default(PENDING)
+  scheduledAt   DateTime?
+  completedAt   DateTime?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
