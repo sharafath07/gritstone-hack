@@ -8,7 +8,7 @@ import matchesRouter from "./routes/matches.routes.js";
 import aiRouter from "./routes/ai.routes.js";
 import pickupsRouter from "./routes/pickups.routes.js";
 import authRouter from "./routes/auth.routes.js";
-
+import impactRouter from "./routes/impact.routes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -51,6 +51,7 @@ app.use("/api/matches", matchesRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/pickups", pickupsRouter);
+app.use("/api/impact", impactRouter);
 
 app.use((error, _req, res, _next) => {
     console.error(error);
